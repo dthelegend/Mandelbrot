@@ -10,12 +10,16 @@
 
 int main(int argc, char *argv[]) {
     // Parameters
+//    const float argandStartX = -2;
+//    const float argandEndX = 0.75;
+//    const float argandStartY = -0.7734375;
+//    const float argandEndY = 0.7734375;
     const float argandStartX = -2;
-    const float argandEndX = 0.75;
-    const float argandStartY = -0.7734375;
-    const float argandEndY = 0.7734375;
+    const float argandEndX = 2;
+    const float argandStartY = -2;
+    const float argandEndY = 2;
     const unsigned int imageWidth = 15360;
-    const unsigned int imageHeight = 8640;
+    const unsigned int imageHeight = 15360;
     const unsigned long maxDepth = 1000;
     const Magick::Color hue = Magick::ColorRGB(0,0.5,0);
 
@@ -68,7 +72,8 @@ int main(int argc, char *argv[]) {
                                       ((float) y / imageHeight) * argandRangeY + argandStartY);
 
                 for (depth = 0; depth < maxDepth && abs(zn) <= 2; ++depth) {
-                    zn = pow(zn, 2) + c;
+//                    zn = pow(zn, 2) + c; // Mandelbrot
+                    zn = pow(std::complex<float>{abs(zn.real()), abs(zn.imag())}, 2) + c; // Burning Ship
                 }
 
                 if (depth < maxDepth){
@@ -94,7 +99,7 @@ int main(int argc, char *argv[]) {
 
     std::cout << "Writing image to disk" << std::endl;
 
-    image.write("/home/daudi/Code/Mandelbrot/Mandelbrot.png");
+    image.write("/home/daudi/Code/Mandelbrot/BurningShip.png");
 
     Magick::TerminateMagick();
 
