@@ -8,7 +8,6 @@
 #include <cmath>
 #include <complex>
 #include <iostream>
-#include <CL/sycl.hpp>
 #include <Magick++.h>
 
 // M T

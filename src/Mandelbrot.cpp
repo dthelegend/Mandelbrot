@@ -6,18 +6,7 @@
 //
 
 #include "Mandelbrot.h"
-
-static auto exception_handler = [](sycl::exception_list e_list) {
-    for (std::exception_ptr const& e : e_list) {
-        try {
-            std::rethrow_exception(e);
-        }
-        catch (std::exception const& e) {
-            std::cout << "Failure" << std::endl;
-            std::terminate();
-        }
-    }
-};
+#include "dpc_common.hpp"
 
 int main(int argc, char *argv[]) {
     // Parameters
@@ -28,69 +17,88 @@ int main(int argc, char *argv[]) {
     const unsigned int imageWidth = 15360;
     const unsigned int imageHeight = 8640;
     const unsigned long maxDepth = 1000;
+    const Magick::Color hue = Magick::ColorRGB(0,0.5,0);
 
     // Calculated
     const float argandRangeX = argandEndX - argandStartX;
     const float argandRangeY = argandEndY - argandStartY;
-
-    std::cout << "Creating Sycl Job..." << std::endl;
-
-    // Initialise device
-    sycl::default_selector d_selector;
-
-    // Create a command queue
-    sycl::queue queue(d_selector, exception_handler);
-
-    // Report on the device the queue is using
-    std::cout << "Using device: " << queue.get_device().get_info<sycl::info::device::name>() << std::endl;
-
-    sycl::range<2> num_pixels{ imageWidth, imageHeight };
-
-    sycl::buffer<unsigned int, 2> buffer(num_pixels);
-
-    queue.submit([&](sycl::handler &h) {
-        sycl::accessor buff_access(buffer, h, sycl::write_only);
-
-        h.parallel_for(num_pixels, [=](sycl::id<2> i) {
-            unsigned long x = i[0], y = i[1];
-            unsigned int depth;
-
-            std::complex<float> zn(0, 0);
-            std::complex<float> c(((float) x / imageWidth) * argandRangeX + argandStartX, ((float) y / imageHeight) * argandRangeY + argandStartY);
-
-            for (depth = 0; depth < maxDepth && abs(zn) <= 2; ++depth) {
-                zn = pow(zn, 2) + c;
-            }
-
-            buff_access[x][y] = depth;
-        });
-    });
-
-    std::cout << "Sycl kernels launched" << std::endl;
-
-    queue.wait_and_throw();
-
-    std::cout << "Sycl kernels completed" << std::endl;
+    const Magick::Quantum hueRed = hue.quantumRed();
+    const Magick::Quantum hueBlue = hue.quantumBlue();
+    const Magick::Quantum hueGreen = hue.quantumGreen();
+    const Magick::Quantum hueAlpha = hue.quantumAlpha();
 
     // Create Image
     std::cout << "Creating Image" << std::endl;
 
     Magick::InitializeMagick(*argv);
 
-    sycl::host_accessor hostAccessor(buffer);
+    Magick::Image image(Magick::Geometry(imageWidth, imageHeight), Magick::ColorRGB(0, 0, 0, 0));
 
-    auto image = new Magick::Image(Magick::Geometry(imageWidth, imageHeight), Magick::ColorRGB(0, 0, 0, 0));
+    image.type(Magick::TrueColorAlphaType);
+    image.modifyImage();
 
-    for(int i = 0; i < imageWidth; i++) {
-        for(int j = 0; j < imageHeight; j++) {
-        }
+    Magick::Pixels view(image);
+
+    // Get pixels for buffer
+    Magick::Quantum *pixels = view.set(0, 0, imageWidth, imageHeight);
+
+    {
+        std::cout << "Creating Sycl Job..." << std::endl;
+
+        // Initialise device
+        sycl::default_selector d_selector;
+
+        // Create a command queue
+        sycl::queue queue(d_selector);
+
+        // Report on the device the queue is using
+        std::cout << "Using device: " << queue.get_device().get_info<sycl::info::device::name>() << std::endl;
+
+        sycl::buffer<Magick::Quantum, 3> buffer(pixels, {imageHeight, imageWidth, 4});
+
+        queue.submit([&](sycl::handler &h) {
+            sycl::accessor buff_access(buffer, h, sycl::write_only, sycl::no_init);
+
+            h.parallel_for({view.columns(), view.rows()}, [=](sycl::id<2> i) {
+                unsigned long x = i[0], y = i[1];
+                unsigned int depth;
+
+                std::complex<float> zn(0, 0);
+                std::complex<float> c(((float) x / imageWidth) * argandRangeX + argandStartX,
+                                      ((float) y / imageHeight) * argandRangeY + argandStartY);
+
+                for (depth = 0; depth < maxDepth && abs(zn) <= 2; ++depth) {
+                    zn = pow(zn, 2) + c;
+                }
+
+                if (depth < maxDepth){
+                    auto percentageHue = (float) depth / (maxDepth - 1);
+                    buff_access[y][x][0] = hueRed + (QuantumRange - hueRed) * percentageHue;
+                    buff_access[y][x][1] = hueGreen + (QuantumRange - hueGreen) * percentageHue;
+                    buff_access[y][x][2] = hueBlue + (QuantumRange - hueBlue) * percentageHue;
+                }
+                buff_access[y][x][3] = hueAlpha;
+            });
+        });
+
+        std::cout << "Sycl kernels launched" << std::endl;
+
+        queue.wait_and_throw();
+
+        std::cout << "Sycl kernels completed" << std::endl;
     }
 
-    image->write("/home/daudi/Code/Mandelbrot/Mandelbrot.png");
+    std::cout << "Writing image from cache" << std::endl;
+
+    view.sync();
+
+    std::cout << "Writing image to disk" << std::endl;
+
+    image.write("/home/daudi/Code/Mandelbrot/Mandelbrot.png");
 
     Magick::TerminateMagick();
 
-    std::cout << "Image created" << std::endl;
+    std::cout << "Image written to disk" << std::endl;
 
     return 0;
 }
